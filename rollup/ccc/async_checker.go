@@ -82,11 +82,9 @@ func (c *AsyncChecker) Wait() {
 // Check spawns an async CCC verification task.
 func (c *AsyncChecker) Check(block *types.Block) error {
 	checker := <-c.freeCheckers
-	go func() { // workers.Go can block, run this async
-		c.workers.Go(func() stream.Callback {
-			return c.checkerTask(block, checker)
-		})
-	}()
+	c.workers.Go(func() stream.Callback {
+		return c.checkerTask(block, checker)
+	})
 	return nil
 }
 
