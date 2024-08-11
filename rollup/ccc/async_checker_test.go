@@ -57,7 +57,9 @@ func TestAsyncChecker(t *testing.T) {
 
 	reorgBlocks := bs[len(bs)/2:]
 	skippedTxn := reorgBlocks[3].Transactions()[3]
-	asyncChecker.checkers[0].Skip(skippedTxn.Hash(), ErrBlockRowConsumptionOverflow)
+	checker := <-asyncChecker.freeCheckers
+	checker.Skip(skippedTxn.Hash(), ErrBlockRowConsumptionOverflow)
+	asyncChecker.freeCheckers <- checker
 
 	var failingBlockHash common.Hash
 	var errIdx uint

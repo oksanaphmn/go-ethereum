@@ -39,9 +39,8 @@ type AsyncChecker struct {
 	bc             Blockchain
 	onFailingBlock func(*types.Block, error)
 
-	workers        *stream.Stream
-	checkers       []*Checker
-	freeCheckerIdx int
+	workers      *stream.Stream
+	freeCheckers chan *Checker
 }
 
 type ErrorWithTxnIdx struct {
@@ -60,10 +59,10 @@ func (e *ErrorWithTxnIdx) Unwrap() error {
 func NewAsyncChecker(bc Blockchain, numWorkers int) *AsyncChecker {
 	return &AsyncChecker{
 		bc: bc,
-		checkers: func(count int) []*Checker {
-			checkers := make([]*Checker, count)
-			for idx := range checkers {
-				checkers[idx] = NewChecker(true)
+		freeCheckers: func(count int) chan *Checker {
+			checkers := make(chan *Checker, count)
+			for i := 0; i < count; i++ {
+				checkers <- NewChecker(true)
 			}
 			return checkers
 		}(numWorkers),
@@ -82,8 +81,7 @@ func (c *AsyncChecker) Wait() {
 
 // Check spawns an async CCC verification task.
 func (c *AsyncChecker) Check(block *types.Block) error {
-	checker := c.checkers[c.freeCheckerIdx]
-	c.freeCheckerIdx = (c.freeCheckerIdx + 1) % len(c.checkers)
+	checker := <-c.freeCheckers
 	go func() { // workers.Go can block, run this async
 		c.workers.Go(func() stream.Callback {
 			return c.checkerTask(block, checker)
@@ -95,8 +93,11 @@ func (c *AsyncChecker) Check(block *types.Block) error {
 func (c *AsyncChecker) checkerTask(block *types.Block, ccc *Checker) stream.Callback {
 	activeWorkersGauge.Inc(1)
 	checkStart := time.Now()
-	defer activeWorkersGauge.Dec(1)
-	defer checkTimer.UpdateSince(checkStart)
+	defer func() {
+		checkTimer.UpdateSince(checkStart)
+		c.freeCheckers <- ccc
+		activeWorkersGauge.Dec(1)
+	}()
 
 	parent := c.bc.GetBlock(block.ParentHash(), block.NumberU64()-1)
 	if parent == nil {
